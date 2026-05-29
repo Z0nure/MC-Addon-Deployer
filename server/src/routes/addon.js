@@ -1,21 +1,19 @@
 import express from "express";
 import multer from "multer";
 import { PanelAPI, detectPanel } from "../services/apiHandler.js";
-import { processAddon } from "../services/addonProcessor.js";
+import { processAddons } from "../services/addonProcessor.js";
 
 const router = express.Router();
 
-// Store file in memory — no disk writes on our server
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB per file
   fileFilter: (req, file, cb) => {
-    const allowed = [".mcaddon", ".mcpack"];
     const ext = "." + file.originalname.split(".").pop().toLowerCase();
-    if (allowed.includes(ext)) {
+    if ([".mcaddon", ".mcpack"].includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error("Only .mcaddon and .mcpack files are allowed"));
+      cb(new Error("Only .mcaddon and .mcpack files are allowed."));
     }
   },
 });
@@ -24,27 +22,26 @@ const upload = multer({
  * POST /api/addon/deploy
  *
  * Multipart form fields:
- *   - file       : the .mcaddon or .mcpack file
+ *   - files[]    : one or more .mcaddon / .mcpack files
  *   - panelUrl   : e.g. https://panel.example.com
  *   - apiKey     : Pelican (pacc_) or Pterodactyl (ptlc_) client API key
  *   - serverId   : server identifier
- *   - worldPath  : e.g. worlds/default  (optional, defaults to worlds/default)
- *   - restart    : "true" to restart server after deploy (optional)
+ *   - worldPath  : world path, default "worlds/default"
+ *   - restart    : "true" to restart server after deploy
  *
- * Streams progress back as Server-Sent Events (SSE)
+ * Streams progress as Server-Sent Events (SSE).
  */
-router.post("/deploy", upload.single("file"), async (req, res) => {
+router.post("/deploy", upload.array("files[]", 50), async (req, res) => {
   const { panelUrl, apiKey, serverId, worldPath = "worlds/default", restart = "false" } = req.body;
 
-  // Validate required fields
   if (!panelUrl || !apiKey || !serverId) {
     return res.status(400).json({ error: "panelUrl, apiKey, and serverId are required." });
   }
-  if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded." });
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: "No files uploaded." });
   }
 
-  // Set up SSE so the client gets live progress logs
+  // SSE setup
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -57,35 +54,41 @@ router.post("/deploy", upload.single("file"), async (req, res) => {
   try {
     const panelType = detectPanel(apiKey);
 
-    // Warn if they accidentally used an application key instead of a client key
     if (panelType === "pterodactyl-app") {
       send("warn", "⚠ Detected a Pterodactyl application key (ptla_). You need a client key (ptlc_) instead.");
     } else if (panelType === "unknown") {
-      send("warn", "⚠ Unrecognized API key prefix. Proceeding anyway — check your key if this fails.");
+      send("warn", "⚠ Unrecognized API key prefix — check your key if something goes wrong.");
     } else {
-      const label = panelType === "pelican" ? "Pelican" : "Pterodactyl";
-      send("info", `🎛 Panel detected: ${label}`);
+      send("info", `🎛 Panel: ${panelType === "pelican" ? "Pelican" : "Pterodactyl"}`);
     }
+
+    send("info", `📁 ${req.files.length} file(s) queued for processing`);
 
     const api = new PanelAPI(panelUrl, apiKey, serverId);
 
-    const results = await processAddon(
-      req.file.buffer,
-      req.file.originalname,
+    const results = await processAddons(
+      req.files.map((f) => f.buffer),
+      req.files.map((f) => f.originalname),
       api,
       worldPath,
       { onLog: (msg, type) => send(type, msg) }
     );
 
     if (restart === "true") {
-      send("info", "\n🔄 Restarting server...");
-      await api.restartServer();
-      send("success", "✔ Server restarted");
+      send("info", "\n🔄 Restarting server…");
+      try {
+        await api.restartServer();
+        send("success", "✔ Server restarted");
+      } catch (err) {
+        console.error("[ROUTE] Failed to restart server:", err);
+        send("warn", "⚠ Could not restart the server — you may need to do it manually.");
+      }
     }
 
     send("done", JSON.stringify(results));
   } catch (err) {
-    send("error", `Fatal error: ${err.message}`);
+    console.error("[ROUTE] Fatal deploy error:", err);
+    send("error", "Something went wrong on the server. Check the server logs for details.");
   } finally {
     res.end();
   }
@@ -93,31 +96,35 @@ router.post("/deploy", upload.single("file"), async (req, res) => {
 
 /**
  * POST /api/addon/validate
- * Quick validate an addon file without deploying — returns pack info.
+ * Validate files without deploying — returns pack info and install status.
  */
-router.post("/validate", upload.single("file"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded." });
+router.post("/validate", upload.array("files[]", 50), async (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: "No files uploaded." });
   }
 
   try {
     const mockApi = {
+      pollInstalledPacks: async () => new Map(),
       uploadFile: async () => {},
       registerPack: async () => true,
+      updatePackVersion: async () => true,
+      deletePackFolder: async () => {},
       readPackJson: async () => [],
     };
 
-    const results = await processAddon(
-      req.file.buffer,
-      req.file.originalname,
+    const results = await processAddons(
+      req.files.map((f) => f.buffer),
+      req.files.map((f) => f.originalname),
       mockApi,
       "worlds/default",
       { onLog: () => {} }
     );
 
-    res.json({ valid: results.some((r) => r.success), packs: results });
+    res.json({ packs: results });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("[ROUTE] Validate error:", err);
+    res.status(500).json({ error: "Validation failed." });
   }
 });
 

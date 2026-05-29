@@ -1,31 +1,27 @@
 import { useState, useCallback } from "react";
 
 export function useDeploy() {
-  const [logs, setLogs] = useState([]);
-  const [status, setStatus] = useState("idle"); // idle | deploying | done | error
+  const [logs, setLogs]       = useState([]);
+  const [status, setStatus]   = useState("idle"); // idle | deploying | done | error
   const [results, setResults] = useState(null);
 
   const addLog = (message, type = "info") =>
     setLogs((prev) => [...prev, { message, type, id: Date.now() + Math.random() }]);
 
-  const reset = () => {
-    setLogs([]);
-    setStatus("idle");
-    setResults(null);
-  };
+  const reset = () => { setLogs([]); setStatus("idle"); setResults(null); };
 
-  const deploy = useCallback(async ({ file, panelUrl, apiKey, serverId, worldPath, restart }) => {
+  const deploy = useCallback(async ({ files, panelUrl, apiKey, serverId, worldPath, restart }) => {
     setLogs([]);
     setResults(null);
     setStatus("deploying");
 
     const form = new FormData();
-    form.append("file", file);
-    form.append("panelUrl", panelUrl);
-    form.append("apiKey", apiKey);
-    form.append("serverId", serverId);
+    for (const file of files) form.append("files[]", file);
+    form.append("panelUrl",  panelUrl);
+    form.append("apiKey",    apiKey);
+    form.append("serverId",  serverId);
     form.append("worldPath", worldPath || "worlds/default");
-    form.append("restart", restart ? "true" : "false");
+    form.append("restart",   restart ? "true" : "false");
 
     try {
       const res = await fetch("/api/addon/deploy", { method: "POST", body: form });
@@ -35,10 +31,9 @@ export function useDeploy() {
         throw new Error(err.error || "Request failed");
       }
 
-      // Read the SSE stream
-      const reader = res.body.getReader();
+      const reader  = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer    = "";
 
       while (true) {
         const { value, done } = await reader.read();
@@ -46,7 +41,7 @@ export function useDeploy() {
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop(); // Keep incomplete line
+        buffer = lines.pop();
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
@@ -58,9 +53,7 @@ export function useDeploy() {
             } else {
               addLog(message, type);
             }
-          } catch {
-            // Malformed SSE line, skip
-          }
+          } catch { /* malformed SSE line */ }
         }
       }
     } catch (err) {
