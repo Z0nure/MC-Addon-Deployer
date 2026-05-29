@@ -1,8 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { useDeploy } from "./hooks/useDeploy.js";
 
-// ─── Replace with your actual GitHub URL ──────────────────────────────────────
-const GITHUB_URL = "https://github.com/yourusername/mc-addon-deployer";
+// ─── Config from environment ──────────────────────────────────────────────────
+const GITHUB_URL  = import.meta.env.VITE_GITHUB_URL      ?? "https://github.com/Z0nure/MC-Addon-Deployer";
+const PYTHON_REPO = import.meta.env.VITE_PYTHON_REPO_URL ?? "https://github.com/Z0nure/mcaddon-cli";
+const KOFI_URL    = import.meta.env.VITE_KOFI_URL        ?? "https://ko-fi.com/zonure";
+const AUTHOR      = import.meta.env.VITE_AUTHOR          ?? "Zonure";
+const AUTHOR_URL  = import.meta.env.VITE_AUTHOR_URL      ?? "https://zonure.xyz";
+const SITE_NAME   = import.meta.env.VITE_SITE_NAME       ?? "mc-addon-deployer";
 
 // ─── Icons (inline SVG, no deps) ─────────────────────────────────────────────
 const GitHubIcon = () => (
@@ -62,7 +67,7 @@ function Nav() {
           <span style={{
             fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13,
             color: "var(--accent)", letterSpacing: "-0.02em", whiteSpace: "nowrap",
-          }}>mc-addon-deployer</span>
+          }}>{SITE_NAME}</span>
           <span style={{
             fontSize: 10, fontFamily: "var(--mono)", color: "var(--muted)",
             background: "var(--surface-2)", border: "1px solid var(--border-hi)",
@@ -70,11 +75,11 @@ function Nav() {
           }}>v1.0</span>
           <span className="nav-by" style={{ fontSize: 12, color: "var(--muted)", fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>
             by{" "}
-            <a href="https://zonure.xyz" target="_blank" rel="noopener noreferrer"
+            <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer"
               style={{ color: "var(--muted)", transition: "color 0.15s" }}
               onMouseEnter={e => e.target.style.color = "var(--accent)"}
               onMouseLeave={e => e.target.style.color = "var(--muted)"}
-            >Zonure</a>
+            >{AUTHOR}</a>
           </span>
         </div>
 
@@ -400,7 +405,7 @@ function Guide() {
             <code>.mcpack</code> and handles everything the same way.
           </div>
         </div>
-        <a href={`${GITHUB_URL}/tree/main/python`} target="_blank" rel="noopener noreferrer" style={{
+        <a href={PYTHON_REPO} target="_blank" rel="noopener noreferrer" style={{
           display: "inline-flex", alignItems: "center", gap: 6, flexShrink: 0,
           padding: "10px 18px", border: "1px solid var(--border-hi)", borderRadius: 8,
           color: "var(--text-2)", fontSize: 13, fontWeight: 600, alignSelf: "center",
@@ -712,24 +717,28 @@ function Footer() {
     }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <span style={{ fontFamily: "var(--mono)", fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>
-          mc-addon-deployer
+          {SITE_NAME}
         </span>
         <span style={{ fontSize: 12, color: "var(--muted)" }}>
-          Open source · MIT License
+          Open source · AGPL-3.0
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-          <a href="https://zonure.xyz" target="_blank" rel="noopener noreferrer" style={{
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+          <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" style={{
             fontSize: 12, fontFamily: "var(--mono)", fontWeight: 700,
-            color: "var(--text-2)", letterSpacing: "0.05em",
-            transition: "color 0.15s",
+            color: "var(--text-2)", letterSpacing: "0.05em", transition: "color 0.15s",
           }}
           onMouseEnter={e => e.target.style.color = "var(--accent)"}
           onMouseLeave={e => e.target.style.color = "var(--text-2)"}
-          >Zonure</a>
+          >{AUTHOR}</a>
           <span style={{ color: "var(--border-hi)" }}>·</span>
-          <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>
-            The Lazy Lizard
-          </span>
+          <span style={{ fontSize: 12, color: "var(--muted)", fontStyle: "italic" }}>The Lazy Lizard</span>
+          <span style={{ color: "var(--border-hi)" }}>·</span>
+          <a href={KOFI_URL} target="_blank" rel="noopener noreferrer" style={{
+            fontSize: 12, color: "var(--muted)", transition: "color 0.15s",
+          }}
+          onMouseEnter={e => e.target.style.color = "#ff5e5b"}
+          onMouseLeave={e => e.target.style.color = "var(--muted)"}
+          >☕ Ko-fi</a>
         </div>
       </div>
 
