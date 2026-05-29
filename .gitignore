@@ -1,0 +1,43 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build output ──────────────────────────────────────────────
+client/dist/
+client/dist-ssr/
+
+# ── Environment & secrets ─────────────────────────────────────
+# Never commit real .env files — use .env.example as the template
+.env
+.env.*
+!.env.example
+
+# ── PM2 ───────────────────────────────────────────────────────
+.pm2/
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ── OS files ──────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Editor & IDE ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.suo
+.project
+.classpath
+
+# ── Temp & misc ───────────────────────────────────────────────
+tmp/
+temp/
+*.local
+*.tmp
