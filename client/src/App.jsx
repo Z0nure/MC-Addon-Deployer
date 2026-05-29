@@ -263,15 +263,23 @@ function DeployTab() {
 
   const removeFile = (file) => setQueue(prev => prev.filter(f => f !== file));
 
-  // Map results back to files by filename
+  // Map results back to files by sourceName (exact match on filename)
   const resultMap = {};
   if (results) {
     for (const r of results) {
-      // match by pack name — best effort
-      const match = queue.find(f => f.name.replace(/\.(mcaddon|mcpack)$/i, "").replace(/\s+/g, "_") === r.name || f.name === r.name);
-      if (match) resultMap[match.name] = r;
+      const match = queue.find(f => f.name === r.sourceName);
+      if (match && !resultMap[match.name]) resultMap[match.name] = r;
     }
   }
+
+  // Dedup by sourceName — one addon can produce 2 result entries (RP + BP), count it as 1
+  const dedupedResults = results
+    ? Object.values(results.reduce((acc, r) => {
+        const key = r.sourceName ?? r.name;
+        if (!acc[key]) acc[key] = r;
+        return acc;
+      }, {}))
+    : null;
 
   const canDeploy = queue.length > 0 && panelUrl && apiKey && serverId && status !== "deploying";
 
@@ -282,10 +290,10 @@ function DeployTab() {
 
   const handleReset = () => { reset(); setQueue([]); };
 
-  const installed  = results?.filter(r => r.status === "install").length ?? 0;
-  const updated    = results?.filter(r => r.status === "update").length ?? 0;
-  const skipped    = results?.filter(r => r.status === "skip").length ?? 0;
-  const failed     = results?.filter(r => r.status === "error").length ?? 0;
+  const installed  = dedupedResults?.filter(r => r.status === "install").length ?? 0;
+  const updated    = dedupedResults?.filter(r => r.status === "update").length ?? 0;
+  const skipped    = dedupedResults?.filter(r => r.status === "skip").length ?? 0;
+  const failed     = dedupedResults?.filter(r => r.status === "error").length ?? 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>

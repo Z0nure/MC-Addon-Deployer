@@ -164,7 +164,7 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
           try {
             const packBuffer = await packFile.async("nodebuffer");
             const packZip = await JSZip.loadAsync(packBuffer);
-            packsToProcess.push({ zip: packZip, sourceName: packName });
+            packsToProcess.push({ zip: packZip, sourceName: filename });
           } catch (err) {
             console.error(`[PROCESSOR] Failed to open inner pack ${packName}:`, err);
             onLog(`  ❌ Could not read ${packName} inside the addon.`, "error");
@@ -198,7 +198,7 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
 
     if (!packUuid) {
       onLog(`\n❌ "${packName}" has no UUID in manifest — skipping.`, "error");
-      results.push({ name: packName, status: "error", error: "No UUID in manifest." });
+      results.push({ name: packName, sourceName, status: "error", error: "No UUID in manifest." });
       continue;
     }
 
@@ -210,7 +210,7 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
     // ── Skip ────────────────────────────────────────────────────────────────
     if (resolution.status === "skip") {
       onLog(`  ⚠ ${resolution.reason} — skipping.`, "warn");
-      results.push({ name: packName, type: packType, uuid: packUuid, status: "skip", reason: resolution.reason });
+      results.push({ name: packName, sourceName, type: packType, uuid: packUuid, status: "skip", reason: resolution.reason });
       continue;
     }
 
@@ -261,12 +261,13 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
       }
       if (packType === "unknown") {
         onLog(`  ⚠ Could not determine pack type — skipping.`, "warn");
-        results.push({ name: packName, status: "skip", reason: "Unknown pack type." });
+        results.push({ name: packName, sourceName, status: "skip", reason: "Unknown pack type." });
         continue;
       }
 
       results.push({
         name: packName,
+        sourceName,
         type: packType,
         uuid: packUuid,
         version: packVersion,
@@ -274,8 +275,8 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
       });
     } catch (err) {
       console.error(`[PROCESSOR] Deploy failed for ${packName}:`, err);
-      onLog(`  ❌ Deployment failed — check server logs for details.`, "error");
-      results.push({ name: packName, status: "error", error: "Deployment failed. Check server logs." });
+      onLog(`  ❌ Deployment failed: ${err?.message ?? String(err)}`, "error");
+      results.push({ name: packName, sourceName, status: "error", error: "Deployment failed. Check server logs." });
     }
   }
 

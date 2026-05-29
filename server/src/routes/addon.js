@@ -88,7 +88,7 @@ router.post("/deploy", upload.array("files[]", 50), async (req, res) => {
     send("done", JSON.stringify(results));
   } catch (err) {
     console.error("[ROUTE] Fatal deploy error:", err);
-    send("error", "Something went wrong on the server. Check the server logs for details.");
+    send("error", `Fatal error: ${err?.message ?? String(err)}`);
   } finally {
     res.end();
   }
