@@ -1,19 +1,35 @@
-# mc-addon-deployer — Web Tool
+# MC-Addon-Deployer
 
-The web interface for deploying Minecraft Bedrock addons to Pelican or Pterodactyl panel servers. Live at **[zonure.xyz](https://zonure.xyz)** — or self-host it on your own machine.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-brightgreen)](https://nodejs.org)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20Zonure-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/zonure)
 
----
+> The laziest way to deploy Minecraft Bedrock addons. Drop your `.mcaddon`, enter your panel credentials, and watch it handle everything — pack detection, file uploads, JSON registration, all of it.
 
-## Stack
-
-- **Frontend** — React + Vite
-- **Backend** — Node.js + Express
-- **File handling** — Multer + JSZip
-- **Panel communication** — Pelican / Pterodactyl Client API
+Live at **[zonure.xyz](https://zonure.xyz)** — or self-host it yourself.
 
 ---
 
-## Using the hosted version
+## Features
+
+- 📦 Accepts `.mcaddon` and `.mcpack` files
+- 🔍 Auto-detects resource packs, behavior packs, or both from `manifest.json`
+- 📁 Copies pack files into the correct folder inside your world
+- 📝 Registers packs in `world_resource_packs.json` and `world_behavior_packs.json`
+- 🔄 Live deploy log streamed to your browser
+- ✅ Skips packs already registered — safe to run multiple times
+- 🎛 Supports both Pelican Panel and Pterodactyl
+
+## Supported Panels
+
+| Panel | API Key Prefix |
+|---|---|
+| Pelican Panel | `pacc_` |
+| Pterodactyl | `ptlc_` |
+
+---
+
+## Using the Hosted Version
 
 Just go to **[zonure.xyz](https://zonure.xyz)** — no setup needed.
 
@@ -21,19 +37,19 @@ Your API key is never stored. See the [Privacy section](https://zonure.xyz#priva
 
 ---
 
-## Self-hosting
+## Self-Hosting
 
 ### Requirements
 
 - Node.js 18 or higher
 - npm 8 or higher
-- A reverse proxy (nginx recommended) or direct port access
+- nginx (recommended) or direct port access
 
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/yourusername/mc-addon-deployer.git
-cd mc-addon-deployer
+git clone https://github.com/Z0nure/MC-Addon-Deployer.git
+cd MC-Addon-Deployer
 ```
 
 ### 2. Install dependencies
@@ -62,11 +78,13 @@ npm run build --workspace=client
 
 ### 5. Start the server
 
+**One-time:**
 ```bash
-# One-time
 npm run start --workspace=server
+```
 
-# With PM2 (recommended — keeps it running after reboot)
+**With PM2 (recommended):**
+```bash
 npm install -g pm2
 pm2 start ecosystem.config.cjs
 pm2 save
@@ -75,13 +93,13 @@ pm2 startup
 
 ---
 
-## Nginx config (recommended)
+## Nginx Config
 
 ```nginx
 server {
     server_name yourdomain.com;
 
-    root /path/to/mc-addon-deployer/client/dist;
+    root /path/to/MC-Addon-Deployer/client/dist;
     index index.html;
 
     location /assets/ {
@@ -89,7 +107,6 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    # API — proxy to Express
     location /api/ {
         proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
@@ -107,8 +124,6 @@ server {
     location / {
         try_files $uri $uri/ /index.html;
     }
-
-    # Add your SSL config here (certbot manages this automatically)
 }
 ```
 
@@ -119,7 +134,6 @@ server {
 **After client changes:**
 ```bash
 npm run build --workspace=client
-# nginx picks up the new build automatically
 ```
 
 **After server changes:**
@@ -134,7 +148,7 @@ npm run build --workspace=client && pm2 restart mc-addon-deployer
 
 ---
 
-## API endpoints
+## API Reference
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -142,7 +156,7 @@ npm run build --workspace=client && pm2 restart mc-addon-deployer
 | `POST` | `/api/addon/validate` | Validate an addon without deploying. |
 | `GET` | `/api/health` | Health check. |
 
-### Deploy request (multipart/form-data)
+### Deploy Fields (multipart/form-data)
 
 | Field | Required | Description |
 |---|---|---|
@@ -155,4 +169,18 @@ npm run build --workspace=client && pm2 restart mc-addon-deployer
 
 ---
 
-Part of the [mc-addon-deployer](https://github.com/yourusername/mc-addon-deployer) project by [Zonure](https://zonure.xyz)
+## Prefer the terminal?
+
+Check out **[mcaddon-cli](https://github.com/Z0nure/mcaddon-cli)** — a standalone Python script for SSH users. No panel needed.
+
+---
+
+## Support
+
+If this saved you time, consider buying me a coffee ☕
+
+[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/zonure)
+
+---
+
+Made by [Zonure](https://zonure.xyz) — *The Lazy Lizard*
