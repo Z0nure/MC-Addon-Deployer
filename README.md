@@ -60,6 +60,9 @@ npm install
 
 ### 3. Configure environment
 
+Both `server` and `client` have their own `.env` files.
+
+**Server:**
 ```bash
 cp server/.env.example server/.env
 nano server/.env
@@ -69,6 +72,23 @@ nano server/.env
 PORT=3001
 CLIENT_URL=https://yourdomain.com
 ```
+
+**Client (branding):**
+```bash
+cp client/.env.example client/.env
+nano client/.env
+```
+
+```env
+VITE_SITE_NAME=mc-addon-deployer
+VITE_AUTHOR=YourName
+VITE_AUTHOR_URL=https://yoursite.com
+VITE_GITHUB_URL=https://github.com/yourname/MC-Addon-Deployer
+VITE_PYTHON_REPO_URL=https://github.com/yourname/mcaddon-cli
+VITE_KOFI_URL=https://ko-fi.com/yourname
+```
+
+> All `VITE_` values are optional — the site has fallbacks built in and will still work without them. Only set them if you're forking and want your own branding.
 
 ### 4. Build the frontend
 
