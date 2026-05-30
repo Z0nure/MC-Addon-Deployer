@@ -203,6 +203,36 @@ export class PanelAPI {
   }
 
   /**
+   * List files/folders in a directory.
+   * Returns array of { name, is_file } objects.
+   */
+  async listFiles(directory) {
+    try {
+      const res = await this.client.get("/files/list", {
+        params: { directory: "/" + directory.replace(/^\//, "") },
+      });
+      return res.data.data.map(f => ({
+        name: f.attributes.name,
+        is_file: f.attributes.is_file,
+      }));
+    } catch (err) {
+      logAxiosError(`list files in ${directory}`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Remove a pack entry from a world JSON file by UUID.
+   */
+  async removePackEntry(filePath, packUuid) {
+    const entries = await this.readPackJson(filePath);
+    const filtered = entries.filter(e => e.pack_id !== packUuid);
+    if (filtered.length === entries.length) return false; // wasn't there
+    await this.writeFile(filePath, JSON.stringify(filtered, null, 2));
+    return true;
+  }
+
+  /**
    * Restart the server.
    */
   async restartServer() {
