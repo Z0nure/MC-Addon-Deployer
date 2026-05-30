@@ -29,7 +29,7 @@ const XIcon = () => (
 );
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
-const TABS = ["deploy", "guide", "privacy"];
+const TABS = ["deploy", "uninstall", "guide", "privacy"];
 
 function Nav({ activeTab, setActiveTab }) {
   const [scrolled, setScrolled]   = useState(false);
@@ -396,6 +396,281 @@ function DeployTab() {
           </div>
         </div>
       )}
+      {/* CLI callout */}
+      {status === "idle" && queue.length === 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 16, flexWrap: "wrap",
+          padding: "14px 18px",
+          background: "var(--surface)", border: "1px solid var(--border)",
+          borderRadius: 10, fontSize: 13, color: "var(--text-2)", lineHeight: 1.6,
+        }}>
+          <span>Not using Pelican or Pterodactyl? Prefer the command line?</span>
+          <a href={PYTHON_REPO} target="_blank" rel="noopener noreferrer" style={{
+            display: "flex", alignItems: "center", gap: 6, flexShrink: 0,
+            fontSize: 12, fontWeight: 600, color: "var(--muted)",
+            padding: "6px 12px", border: "1px solid var(--border-hi)", borderRadius: 6,
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.color = "var(--accent)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border-hi)"; e.currentTarget.style.color = "var(--muted)"; }}
+          ><GitHubIcon /> mcaddon-cli</a>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Uninstall tab ────────────────────────────────────────────────────────────
+function useUninstall() {
+  const [addons, setAddons]       = useState(null);
+  const [loading, setLoading]     = useState(false);
+  const [error, setError]         = useState(null);
+  const [selected, setSelected]   = useState(new Set());
+  const [logs, setLogs]           = useState([]);
+  const [status, setStatus]       = useState("idle"); // idle | removing | done | error
+
+  const addLog = (message, type) =>
+    setLogs(prev => [...prev, { message, type, id: Date.now() + Math.random() }]);
+
+  const fetchInstalled = async ({ panelUrl, apiKey, serverId, worldPath }) => {
+    setLoading(true); setError(null); setAddons(null); setSelected(new Set());
+    try {
+      const res = await fetch("/api/addon/installed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panelUrl, apiKey, serverId, worldPath }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to fetch installed addons");
+      setAddons(data.addons);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const uninstall = async ({ panelUrl, apiKey, serverId, worldPath }) => {
+    const toRemove = addons.filter(a => selected.has(a.name));
+    if (!toRemove.length) return;
+    setLogs([]); setStatus("removing");
+    try {
+      const res = await fetch("/api/addon/uninstall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panelUrl, apiKey, serverId, worldPath, addons: toRemove }),
+      });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const { type, message } = JSON.parse(line.slice(6));
+            if (type === "done") {
+              setStatus("done");
+              // Refresh list
+              await fetchInstalled({ panelUrl, apiKey, serverId, worldPath });
+              setSelected(new Set());
+            } else {
+              addLog(message, type);
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch (err) {
+      addLog(`❌ ${err.message}`, "error");
+      setStatus("error");
+    }
+  };
+
+  const toggleSelect = (name) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === addons?.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(addons?.map(a => a.name) ?? []));
+    }
+  };
+
+  return { addons, loading, error, selected, logs, status, fetchInstalled, uninstall, toggleSelect, toggleAll };
+}
+
+function AddonRow({ addon, selected, onToggle }) {
+  const types = [
+    addon.resource && "resource",
+    addon.behavior && "behavior",
+  ].filter(Boolean);
+
+  return (
+    <div onClick={onToggle} style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "12px 16px", cursor: "pointer", borderRadius: 8,
+      background: selected ? "rgba(255,77,109,0.06)" : "transparent",
+      border: `1px solid ${selected ? "rgba(255,77,109,0.3)" : "var(--border)"}`,
+      transition: "all 0.15s",
+    }}>
+      <input type="checkbox" checked={selected} onChange={onToggle}
+        onClick={e => e.stopPropagation()}
+        style={{ accentColor: "var(--error)", width: 15, height: 15, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 13, fontWeight: 600,
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {addon.name}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+          {types.map(t => (
+            <span key={t} style={{
+              fontSize: 10, fontFamily: "var(--mono)", padding: "1px 6px",
+              borderRadius: 3, letterSpacing: "0.05em", textTransform: "uppercase",
+              background: t === "resource" ? "rgba(0,229,160,0.08)" : "rgba(126,184,255,0.08)",
+              color: t === "resource" ? "var(--accent)" : "var(--info)",
+              border: `1px solid ${t === "resource" ? "var(--accent-dim)" : "rgba(126,184,255,0.3)"}`,
+            }}>{t}</span>
+          ))}
+          {(addon.resource?.orphaned || addon.behavior?.orphaned) && (
+            <span style={{ fontSize: 10, fontFamily: "var(--mono)", padding: "1px 6px", borderRadius: 3, color: "var(--warn)", border: "1px solid rgba(245,166,35,0.3)", background: "rgba(245,166,35,0.06)" }}>orphaned</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UninstallTab() {
+  const [panelUrl, setPanelUrl]   = useState("");
+  const [apiKey, setApiKey]       = useState("");
+  const [serverId, setServerId]   = useState("");
+  const [worldPath, setWorldPath] = useState("worlds/default");
+  const logsEndRef = useRef();
+
+  const { addons, loading, error, selected, logs, status,
+          fetchInstalled, uninstall, toggleSelect, toggleAll } = useUninstall();
+
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [logs]);
+
+  const creds = { panelUrl, apiKey, serverId, worldPath };
+  const canFetch = panelUrl && apiKey && serverId && !loading;
+  const canUninstall = selected.size > 0 && status !== "removing";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div>
+        <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--accent)", letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 10 }}>Addon Manager</div>
+        <h1 style={{ fontSize: "clamp(24px, 4vw, 38px)", fontWeight: 800, letterSpacing: "-0.02em", lineHeight: 1.1 }}>Uninstall addons</h1>
+        <p style={{ marginTop: 8, color: "var(--text-2)", fontSize: 14, lineHeight: 1.6 }}>
+          Fetch installed addons from your server, select what to remove, and uninstall cleanly — folders and JSON entries both.
+        </p>
+      </div>
+
+      {/* Credentials */}
+      <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, padding: 24, display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Panel Config</div>
+        <div className="deploy-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+          <Field label="Panel URL" value={panelUrl} onChange={setPanelUrl} placeholder="https://panel.example.com" />
+          <Field label="Server ID" value={serverId} onChange={setServerId} placeholder="a1b2c3d4" />
+        </div>
+        <Field label="API Key" type="password" value={apiKey} onChange={setApiKey} placeholder="pacc_… or ptlc_…"
+          hint="Client API key — Account → API Credentials in your panel" />
+        <Field label="World Path" value={worldPath} onChange={setWorldPath} placeholder="worlds/default" />
+        <button onClick={() => fetchInstalled(creds)} disabled={!canFetch} style={{
+          padding: "12px 24px", borderRadius: 8,
+          background: canFetch ? "var(--surface-2)" : "var(--border)",
+          color: canFetch ? "var(--text)" : "var(--muted)",
+          border: `1px solid ${canFetch ? "var(--border-hi)" : "transparent"}`,
+          fontFamily: "var(--sans)", fontWeight: 600, fontSize: 14,
+          cursor: canFetch ? "pointer" : "not-allowed", transition: "all 0.15s",
+          alignSelf: "flex-start",
+        }}
+        onMouseEnter={e => { if (canFetch) e.currentTarget.style.borderColor = "var(--accent)"; }}
+        onMouseLeave={e => { if (canFetch) e.currentTarget.style.borderColor = "var(--border-hi)"; }}
+        >
+          {loading ? "Fetching…" : "Fetch Installed Addons"}
+        </button>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div style={{ padding: "12px 16px", background: "rgba(255,77,109,0.06)", border: "1px solid rgba(255,77,109,0.3)", borderRadius: 8, fontSize: 13, color: "var(--error)" }}>
+          ❌ {error}
+        </div>
+      )}
+
+      {/* Addon list */}
+      {addons && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <div style={{ fontSize: 11, fontFamily: "var(--mono)", color: "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              {addons.length} addon{addons.length !== 1 ? "s" : ""} installed
+              {selected.size > 0 && ` · ${selected.size} selected`}
+            </div>
+            {addons.length > 0 && (
+              <button onClick={toggleAll} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 12, color: "var(--muted)", fontFamily: "var(--mono)",
+                transition: "color 0.15s", padding: 0,
+              }}
+              onMouseEnter={e => e.target.style.color = "var(--text)"}
+              onMouseLeave={e => e.target.style.color = "var(--muted)"}
+              >{selected.size === addons.length ? "Deselect all" : "Select all"}</button>
+            )}
+          </div>
+
+          {addons.length === 0 ? (
+            <div style={{ padding: 24, textAlign: "center", color: "var(--muted)", fontSize: 14 }}>
+              No addons found in this world.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {addons.map(addon => (
+                <AddonRow key={addon.name} addon={addon}
+                  selected={selected.has(addon.name)}
+                  onToggle={() => toggleSelect(addon.name)} />
+              ))}
+            </div>
+          )}
+
+          {selected.size > 0 && (
+            <button onClick={() => uninstall(creds)} disabled={!canUninstall} style={{
+              padding: "13px 24px", border: "none", borderRadius: 8,
+              background: canUninstall ? "var(--error)" : "var(--border)",
+              color: canUninstall ? "#fff" : "var(--muted)",
+              fontFamily: "var(--sans)", fontWeight: 700, fontSize: 14,
+              cursor: canUninstall ? "pointer" : "not-allowed", transition: "all 0.15s",
+            }}>
+              {status === "removing" ? "Removing…" : `Remove ${selected.size} addon${selected.size !== 1 ? "s" : ""}`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Uninstall log */}
+      {logs.length > 0 && (
+        <div style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)", fontSize: 11, fontFamily: "var(--mono)", color: "var(--muted)", letterSpacing: "0.1em", textTransform: "uppercase", display: "flex", alignItems: "center", gap: 8 }}>
+            {status === "removing" && <span style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--error)", display: "inline-block", animation: "pulse 1s infinite" }} />}
+            Uninstall Log
+          </div>
+          <div style={{ padding: 16, maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+            {logs.map(log => <LogLine key={log.id} message={log.message} type={log.type} />)}
+            <div ref={logsEndRef} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -615,9 +890,10 @@ export default function App() {
       <Nav activeTab={activeTab} setActiveTab={setActiveTab} />
       <div className="page-wrap" style={{ maxWidth: 800, margin: "0 auto", padding: "0 24px" }}>
         <div style={{ paddingTop: "calc(var(--nav-h) + 48px)", paddingBottom: 48 }}>
-          {activeTab === "deploy"  && <DeployTab />}
-          {activeTab === "guide"   && <GuideTab />}
-          {activeTab === "privacy" && <PrivacyTab />}
+          {activeTab === "deploy"    && <DeployTab />}
+          {activeTab === "uninstall" && <UninstallTab />}
+          {activeTab === "guide"     && <GuideTab />}
+          {activeTab === "privacy"   && <PrivacyTab />}
         </div>
         <Footer setActiveTab={setActiveTab} />
       </div>
