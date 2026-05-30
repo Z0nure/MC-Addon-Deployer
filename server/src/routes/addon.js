@@ -53,16 +53,13 @@ router.post("/deploy", upload.array("files[]", 50), async (req, res) => {
 
   try {
     const panelType = detectPanel(apiKey);
+    console.log(`[ROUTE] Deploy — panel: ${panelType}, server: ${serverId}, files: ${req.files.length}`);
 
     if (panelType === "pterodactyl-app") {
       send("warn", "⚠ Detected a Pterodactyl application key (ptla_). You need a client key (ptlc_) instead.");
     } else if (panelType === "unknown") {
       send("warn", "⚠ Unrecognized API key prefix — check your key if something goes wrong.");
-    } else {
-      send("info", `🎛 Panel: ${panelType === "pelican" ? "Pelican" : "Pterodactyl"}`);
     }
-
-    send("info", `📁 ${req.files.length} file(s) queued for processing`);
 
     const api = new PanelAPI(panelUrl, apiKey, serverId);
 
@@ -129,3 +126,107 @@ router.post("/validate", upload.array("files[]", 50), async (req, res) => {
 });
 
 export default router;
+
+/**
+ * POST /api/addon/installed
+ * Fetch all installed addons from the server, grouped by name.
+ */
+router.post("/installed", async (req, res) => {
+  const { panelUrl, apiKey, serverId, worldPath = "worlds/default" } = req.body;
+
+  if (!panelUrl || !apiKey || !serverId) {
+    return res.status(400).json({ error: "panelUrl, apiKey, and serverId are required." });
+  }
+
+  try {
+    const { fetchInstalledAddons } = await import("../services/addonProcessor.js");
+    const api = new PanelAPI(panelUrl, apiKey, serverId);
+    const addons = await fetchInstalledAddons(api, worldPath);
+    res.json({ addons });
+  } catch (err) {
+    console.error("[ROUTE] fetchInstalledAddons error:", err);
+    res.status(500).json({ error: "Could not fetch installed addons. Check your panel details." });
+  }
+});
+
+/**
+ * POST /api/addon/uninstall
+ * Remove one or more addons from the server.
+ *
+ * Body: {
+ *   panelUrl, apiKey, serverId, worldPath,
+ *   addons: [{ name, resource: { uuid, folder } | null, behavior: { uuid, folder } | null }]
+ * }
+ */
+router.post("/uninstall", async (req, res) => {
+  const { panelUrl, apiKey, serverId, worldPath = "worlds/default", addons } = req.body;
+
+  if (!panelUrl || !apiKey || !serverId || !addons?.length) {
+    return res.status(400).json({ error: "panelUrl, apiKey, serverId, and addons are required." });
+  }
+
+  // SSE stream
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const send = (type, message) => res.write(`data: ${JSON.stringify({ type, message })}\n\n`);
+
+  try {
+    const api = new PanelAPI(panelUrl, apiKey, serverId);
+    const results = [];
+
+    for (const addon of addons) {
+      console.log(`[ROUTE] Uninstalling "${addon.name}"`);
+      const errors = [];
+
+      // Remove resource pack
+      if (addon.resource) {
+        try {
+          if (addon.resource.folder) {
+            await api.deletePackFolder(`${worldPath}/resource_packs`, addon.resource.folder);
+          }
+          if (addon.resource.uuid) {
+            await api.removePackEntry(`${worldPath}/world_resource_packs.json`, addon.resource.uuid);
+          }
+          send("success", `✔ ${addon.name} — resource pack removed`);
+        } catch (err) {
+          console.error(`[ROUTE] Failed to remove resource pack for "${addon.name}":`, err);
+          errors.push("resource pack removal failed");
+          send("error", `❌ ${addon.name} — resource pack removal failed`);
+        }
+      }
+
+      // Remove behavior pack
+      if (addon.behavior) {
+        try {
+          if (addon.behavior.folder) {
+            await api.deletePackFolder(`${worldPath}/behavior_packs`, addon.behavior.folder);
+          }
+          if (addon.behavior.uuid) {
+            await api.removePackEntry(`${worldPath}/world_behavior_packs.json`, addon.behavior.uuid);
+          }
+          send("success", `✔ ${addon.name} — behavior pack removed`);
+        } catch (err) {
+          console.error(`[ROUTE] Failed to remove behavior pack for "${addon.name}":`, err);
+          errors.push("behavior pack removal failed");
+          send("error", `❌ ${addon.name} — behavior pack removal failed`);
+        }
+      }
+
+      results.push({
+        name: addon.name,
+        status: errors.length === 0 ? "removed" : "partial",
+        errors,
+      });
+    }
+
+    send("done", JSON.stringify(results));
+  } catch (err) {
+    console.error("[ROUTE] Uninstall fatal error:", err);
+    send("error", "Something went wrong during uninstall. Check server logs.");
+  } finally {
+    res.end();
+  }
+});
