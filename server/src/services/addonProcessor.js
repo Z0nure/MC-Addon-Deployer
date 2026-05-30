@@ -84,7 +84,7 @@ function resolveInstallStatus(packUuid, incomingVersion, installedMap) {
 /**
  * Upload all files in a pack to the server.
  */
-async function uploadPackFiles(api, files, destDir, onLog) {
+async function uploadPackFiles(api, files, destDir) {
   for (const [relativePath, zipFile] of Object.entries(files)) {
     const fileBuffer = await zipFile.async("nodebuffer");
     const fileDir = relativePath.includes("/")
@@ -93,7 +93,6 @@ async function uploadPackFiles(api, files, destDir, onLog) {
     const fileName = relativePath.split("/").pop();
     await api.uploadFile(fileDir, fileName, fileBuffer);
   }
-  onLog(`  ✔ Files uploaded to ${destDir}`, "success");
 }
 
 /**
@@ -118,34 +117,34 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
   const results = [];
 
   // ── Step 1: Poll installed packs ──────────────────────────────────────────
-  onLog("🔍 Checking installed packs on server…", "info");
+  onLog("Checking installed packs on server…", "info");
   let installedMap;
   try {
     installedMap = await api.pollInstalledPacks(worldPath);
-    onLog(`  ✔ Found ${installedMap.size} installed pack(s)`, "success");
+    onLog(`Found ${installedMap.size} installed pack(s)`, "info");
   } catch (err) {
     console.error("[PROCESSOR] Failed to poll installed packs:", err);
-    onLog("  ⚠ Could not read world pack files — treating all packs as new installs.", "warn");
+    onLog("⚠ Could not read world pack files — treating all as new installs.", "warn");
     installedMap = new Map();
   }
 
   // ── Step 2: Extract all packs from all uploaded files ─────────────────────
-  const allPacks = []; // { manifest, files, sourceName, zip }
+  const allPacks = [];
 
   for (let i = 0; i < buffers.length; i++) {
     const buffer = buffers[i];
     const filename = filenames[i];
     const isMcAddon = filename.toLowerCase().endsWith(".mcaddon");
 
-    onLog(`\n📦 Reading ${filename}…`, "info");
+    console.log(`[PROCESSOR] Reading ${filename}`);
 
     let outerZip;
     try {
       outerZip = await JSZip.loadAsync(buffer);
     } catch (err) {
       console.error(`[PROCESSOR] Failed to open ${filename}:`, err);
-      onLog(`  ❌ Could not read file — it may be corrupted.`, "error");
-      results.push({ name: filename, status: "error", error: "Could not read file — it may be corrupted." });
+      onLog(`❌ ${filename} — could not read file, it may be corrupted.`, "error");
+      results.push({ name: filename, sourceName: filename, status: "error", error: "Could not read file — it may be corrupted." });
       continue;
     }
 
@@ -157,7 +156,8 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
       );
 
       if (mcpackFiles.length === 0) {
-        onLog("  No .mcpack files found inside — treating as single pack.", "warn");
+        // No inner .mcpack files — addon uses folder structure directly, process as-is
+        console.log(`[PROCESSOR] ${filename}: no inner .mcpack files, processing as single pack`);
         packsToProcess.push({ zip: outerZip, sourceName: filename });
       } else {
         for (const [packName, packFile] of mcpackFiles) {
@@ -167,7 +167,7 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
             packsToProcess.push({ zip: packZip, sourceName: filename });
           } catch (err) {
             console.error(`[PROCESSOR] Failed to open inner pack ${packName}:`, err);
-            onLog(`  ❌ Could not read ${packName} inside the addon.`, "error");
+            onLog(`❌ ${filename}: could not read inner pack file.`, "error");
           }
         }
       }
@@ -178,8 +178,9 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
     for (const { zip, sourceName } of packsToProcess) {
       const packs = await extractPacks(zip);
       if (packs.length === 0) {
-        onLog(`  ❌ No valid manifest.json found in ${sourceName}`, "error");
-        results.push({ name: sourceName, status: "error", error: "No manifest.json found." });
+        console.warn(`[PROCESSOR] No manifest.json found in ${sourceName}`);
+        onLog(`❌ ${sourceName} — no valid manifest.json found.`, "error");
+        results.push({ name: sourceName, sourceName, status: "error", error: "No manifest.json found." });
         continue;
       }
       for (const pack of packs) {
@@ -197,58 +198,52 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
     const packType    = detectPackType(manifest);
 
     if (!packUuid) {
-      onLog(`\n❌ "${packName}" has no UUID in manifest — skipping.`, "error");
+      console.warn(`[PROCESSOR] "${packName}" has no UUID in manifest`);
+      onLog(`❌ ${packName} — no UUID in manifest, skipping.`, "error");
       results.push({ name: packName, sourceName, status: "error", error: "No UUID in manifest." });
       continue;
     }
 
     const resolution = resolveInstallStatus(packUuid, packVersion, installedMap);
 
-    onLog(`\n📋 "${packName}"`, "info");
-    onLog(`   Type: ${packType} | UUID: ${packUuid.slice(0, 8)}… | Version: ${packVersion.join(".")}`, "info");
+    // Verbose info to PM2 logs only
+    console.log(`[PROCESSOR] "${packName}" | type: ${packType} | uuid: ${packUuid} | version: ${packVersion.join(".")} | status: ${resolution.status}`);
 
     // ── Skip ────────────────────────────────────────────────────────────────
     if (resolution.status === "skip") {
-      onLog(`  ⚠ ${resolution.reason} — skipping.`, "warn");
+      onLog(`⚠ ${packName} — ${resolution.reason}`, "warn");
       results.push({ name: packName, sourceName, type: packType, uuid: packUuid, status: "skip", reason: resolution.reason });
       continue;
     }
 
     const isUpdate = resolution.status === "update";
-    if (isUpdate) {
-      onLog(`  → Update detected: ${resolution.oldVersion.join(".")} → ${packVersion.join(".")}`, "info");
-    }
 
     // ── Deploy (install or update) ───────────────────────────────────────────
     const deploy = async (subfolder, worldJsonFile) => {
       const destDir = `${worldPath}/${subfolder}/${packName}`;
       const packFolderParent = `${worldPath}/${subfolder}`;
+      const typeLabel = subfolder === "resource_packs" ? "resource" : "behavior";
 
-      // Delete old folder before update to avoid file conflicts
       if (isUpdate) {
-        onLog(`  → Removing old ${subfolder}/${packName}…`, "info");
+        console.log(`[PROCESSOR] Removing old ${packFolderParent}/${packName} before update`);
         try {
           await api.deletePackFolder(packFolderParent, packName);
-          onLog(`  ✔ Old pack folder removed`, "success");
         } catch (err) {
-          // Log to server, surface friendly message to client
-          onLog(`  ❌ Could not remove old pack folder — update aborted for this pack.`, "error");
+          console.error(`[PROCESSOR] Failed to delete old pack folder:`, err);
+          onLog(`❌ ${packName}: could not remove old ${typeLabel} pack folder.`, "error");
           throw err;
         }
       }
 
-      // Upload files
-      onLog(`  → Uploading to ${destDir}…`, "info");
-      await uploadPackFiles(api, files, destDir, onLog);
+      await uploadPackFiles(api, files, destDir);
 
-      // Update JSON
       const jsonPath = `${worldPath}/${worldJsonFile}`;
       if (isUpdate) {
         await api.updatePackVersion(jsonPath, packUuid, packVersion);
-        onLog(`  ✔ Version updated in ${worldJsonFile}`, "success");
+        onLog(`✔ ${packName} — ${typeLabel} pack updated`, "success");
       } else {
         await api.registerPack(jsonPath, packUuid, packVersion);
-        onLog(`  ✔ Registered in ${worldJsonFile}`, "success");
+        onLog(`✔ ${packName} — ${typeLabel} pack installed`, "success");
       }
     };
 
@@ -260,7 +255,8 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
         await deploy("behavior_packs", "world_behavior_packs.json");
       }
       if (packType === "unknown") {
-        onLog(`  ⚠ Could not determine pack type — skipping.`, "warn");
+        console.warn(`[PROCESSOR] Unknown pack type for "${packName}" — skipping`);
+        onLog(`⚠ ${packName} — could not determine pack type, skipping.`, "warn");
         results.push({ name: packName, sourceName, status: "skip", reason: "Unknown pack type." });
         continue;
       }
@@ -274,11 +270,108 @@ export async function processAddons(buffers, filenames, api, worldPath = "worlds
         status: isUpdate ? "update" : "install",
       });
     } catch (err) {
-      console.error(`[PROCESSOR] Deploy failed for ${packName}:`, err);
-      onLog(`  ❌ Deployment failed: ${err?.message ?? String(err)}`, "error");
+      console.error(`[PROCESSOR] Deploy failed for "${packName}":`, err);
+      onLog(`❌ ${packName} — deployment failed.`, "error");
       results.push({ name: packName, sourceName, status: "error", error: "Deployment failed. Check server logs." });
     }
   }
 
   return results;
+}
+
+/**
+ * Strip common BP/RP/BH/RH suffix patterns from a pack name for grouping.
+ * e.g. "MyCoolPack_BP" → "MyCoolPack", "MyCoolPack_RP" → "MyCoolPack"
+ */
+function normalizeAddonName(name) {
+  return name
+    .replace(/[_\-\s]*(BP|RP|BH|RH|Behavior|Resource|behavior|resource)$/i, "")
+    .replace(/[_\-\s]+$/, "")
+    .trim();
+}
+
+/**
+ * Fetch all installed addons from the server.
+ * 
+ * Flow:
+ *  1. Read both world JSON files to get registered UUIDs
+ *  2. List folders in resource_packs/ and behavior_packs/ inside the world
+ *  3. Read each folder's manifest.json to get name and UUID
+ *  4. Match folders to JSON entries by UUID
+ *  5. Group resource + behavior packs by normalized name into unified addon entries
+ *
+ * Returns array of:
+ * {
+ *   name: string,           — display name
+ *   resource: { uuid, version, folder } | null,
+ *   behavior: { uuid, version, folder } | null,
+ * }
+ */
+export async function fetchInstalledAddons(api, worldPath = "worlds/default") {
+  // Step 1: Read both world JSONs
+  const [resourceEntries, behaviorEntries] = await Promise.all([
+    api.readPackJson(`${worldPath}/world_resource_packs.json`),
+    api.readPackJson(`${worldPath}/world_behavior_packs.json`),
+  ]);
+
+  const resourceUuids = new Map(resourceEntries.map(e => [e.pack_id, e.version]));
+  const behaviorUuids = new Map(behaviorEntries.map(e => [e.pack_id, e.version]));
+
+  // Step 2: List folders
+  const [resourceFolders, behaviorFolders] = await Promise.all([
+    api.listFiles(`${worldPath}/resource_packs`),
+    api.listFiles(`${worldPath}/behavior_packs`),
+  ]);
+
+  // Step 3: Read manifest from each folder and match to JSON entry
+  const readPackInfo = async (folders, parentPath, uuidMap, type) => {
+    const packs = [];
+    for (const folder of folders.filter(f => !f.is_file)) {
+      try {
+        const manifestPath = `${parentPath}/${folder.name}/manifest.json`;
+        const raw = await api.readFile(manifestPath);
+        const manifest = JSON.parse(raw);
+        const uuid = manifest?.header?.uuid ?? "";
+        const name = manifest?.header?.name ?? folder.name;
+        const version = manifest?.header?.version ?? [0, 0, 1];
+
+        if (uuid && uuidMap.has(uuid)) {
+          packs.push({ uuid, name, version, folder: folder.name, type });
+        } else {
+          // Folder exists but not in JSON — orphaned folder, still show it
+          packs.push({ uuid, name, version, folder: folder.name, type, orphaned: true });
+        }
+      } catch (err) {
+        console.warn(`[FETCH] Could not read manifest for ${parentPath}/${folder.name}:`, err.message);
+        // Include folder even without manifest
+        packs.push({ uuid: null, name: folder.name, version: null, folder: folder.name, type, orphaned: true });
+      }
+    }
+    return packs;
+  };
+
+  const [resourcePacks, behaviorPacks] = await Promise.all([
+    readPackInfo(resourceFolders, `${worldPath}/resource_packs`, resourceUuids, "resource"),
+    readPackInfo(behaviorFolders, `${worldPath}/behavior_packs`, behaviorUuids, "behavior"),
+  ]);
+
+  // Step 4: Group by normalized name
+  const addonMap = new Map();
+
+  const addToMap = (pack) => {
+    const key = normalizeAddonName(pack.name).toLowerCase();
+    if (!addonMap.has(key)) {
+      addonMap.set(key, { name: normalizeAddonName(pack.name), resource: null, behavior: null });
+    }
+    const entry = addonMap.get(key);
+    entry[pack.type] = { uuid: pack.uuid, version: pack.version, folder: pack.folder, orphaned: pack.orphaned };
+    // Use the cleaner name (prefer the one without BP/RP suffix)
+    if (pack.name.length < entry.name.length + 3) {
+      entry.name = normalizeAddonName(pack.name);
+    }
+  };
+
+  for (const pack of [...resourcePacks, ...behaviorPacks]) addToMap(pack);
+
+  return Array.from(addonMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
