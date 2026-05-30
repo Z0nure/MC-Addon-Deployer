@@ -12,13 +12,15 @@ Live at **[zonure.xyz](https://zonure.xyz)** — or self-host it yourself.
 
 ## Features
 
-- 📦 Accepts `.mcaddon` and `.mcpack` files
+- 📦 Accepts `.mcaddon` and `.mcpack` files — single or multiple at once
 - 🔍 Auto-detects resource packs, behavior packs, or both from `manifest.json`
 - 📁 Copies pack files into the correct folder inside your world
 - 📝 Registers packs in `world_resource_packs.json` and `world_behavior_packs.json`
-- 🔄 Live deploy log streamed to your browser
-- ✅ Skips packs already registered — safe to run multiple times
+- 🔄 Live deploy log streamed to your browser in real time
+- ⚡ Smart version checking — installs new, updates outdated, skips already installed
+- 🗑 Addon uninstaller — fetch installed addons, select and remove cleanly
 - 🎛 Supports both Pelican Panel and Pterodactyl
+- 🐍 No panel? Use the [mcaddon-cli](https://github.com/Z0nure/mcaddon-cli) Python script instead
 
 ## Supported Panels
 
@@ -88,7 +90,7 @@ VITE_PYTHON_REPO_URL=https://github.com/yourname/mcaddon-cli
 VITE_KOFI_URL=https://ko-fi.com/yourname
 ```
 
-> All `VITE_` values are optional — the site has fallbacks built in and will still work without them. Only set them if you're forking and want your own branding.
+> All `VITE_` values are optional — the site has fallbacks built in and will work without them. Only set them if you're forking with your own branding.
 
 ### 4. Build the frontend
 
@@ -115,12 +117,16 @@ pm2 startup
 
 ## Nginx Config
 
+Add `client_max_body_size` to handle large addon files. The `proxy_buffering off` line is required for the live log stream to work.
+
 ```nginx
 server {
     server_name yourdomain.com;
 
     root /path/to/MC-Addon-Deployer/client/dist;
     index index.html;
+
+    client_max_body_size 100M;
 
     location /assets/ {
         expires 1y;
@@ -136,7 +142,7 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_cache_bypass $http_upgrade;
 
-        # Required for live deploy log streaming
+        # Required for live log streaming (SSE)
         proxy_buffering off;
         proxy_read_timeout 300s;
     }
@@ -168,30 +174,62 @@ npm run build --workspace=client && pm2 restart mc-addon-deployer
 
 ---
 
+## How it works
+
+### Deploy
+
+1. Upload one or more `.mcaddon` or `.mcpack` files
+2. The server reads both world JSON files to check what's already installed
+3. Each pack is categorized — **install**, **update**, or **skip** — based on UUID and version
+4. For updates: the old pack folder is deleted first to avoid file conflicts, then new files are uploaded and the version is patched in the JSON
+5. For installs: files are uploaded and the pack is registered in the JSON
+6. Results are shown per pack with installed / updated / skipped / failed counts
+
+### Uninstall
+
+1. Enter panel credentials and fetch installed addons
+2. The tool reads both world JSON files and lists all pack folders, matching them by UUID
+3. Resource and behavior packs from the same addon are grouped together by name
+4. Select addons to remove — the tool deletes the pack folder(s) and removes the JSON entries
+
+---
+
 ## API Reference
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/addon/deploy` | Deploy an addon. Streams progress as SSE. |
-| `POST` | `/api/addon/validate` | Validate an addon without deploying. |
-| `GET` | `/api/health` | Health check. |
+| `POST` | `/api/addon/deploy` | Deploy addons. Streams progress as SSE. |
+| `POST` | `/api/addon/validate` | Validate addon files without deploying. |
+| `POST` | `/api/addon/installed` | Fetch installed addons grouped by name. |
+| `POST` | `/api/addon/uninstall` | Remove addons. Streams progress as SSE. |
+| `GET`  | `/api/health` | Health check. |
 
-### Deploy Fields (multipart/form-data)
+### Deploy — multipart/form-data
 
 | Field | Required | Description |
 |---|---|---|
-| `file` | ✔ | `.mcaddon` or `.mcpack` file |
+| `files[]` | ✔ | One or more `.mcaddon` or `.mcpack` files |
 | `panelUrl` | ✔ | e.g. `https://panel.example.com` |
 | `apiKey` | ✔ | Client API key (`pacc_` or `ptlc_`) |
 | `serverId` | ✔ | 8-character server ID |
 | `worldPath` | | World path, default `worlds/default` |
 | `restart` | | `"true"` to restart server after deploy |
 
+### Installed & Uninstall — JSON body
+
+| Field | Required | Description |
+|---|---|---|
+| `panelUrl` | ✔ | Panel URL |
+| `apiKey` | ✔ | Client API key |
+| `serverId` | ✔ | Server ID |
+| `worldPath` | | World path, default `worlds/default` |
+| `addons` | ✔ (uninstall only) | Array of addon objects to remove |
+
 ---
 
-## Prefer the terminal?
+## Not on a panel?
 
-Check out **[mcaddon-cli](https://github.com/Z0nure/mcaddon-cli)** — a standalone Python script for SSH users. No panel needed.
+Check out **[mcaddon-cli](https://github.com/Z0nure/mcaddon-cli)** — a standalone Python script for SSH users that works directly on your server filesystem. No panel needed.
 
 ---
 
